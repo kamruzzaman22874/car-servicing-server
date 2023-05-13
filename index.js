@@ -1,6 +1,7 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken')
 require('dotenv').config()
 const app = express();
 const port = process.env.PORT || 5000;
@@ -24,6 +25,23 @@ const client = new MongoClient(uri, {
     }
 });
 
+
+const verifyJWT = (req, res, next) => {
+    const authorization = req.headers.authorization;
+    // console.log(req.headers.authorization);
+    if (!authorization) {
+        return res.status(401).send({ error: true, message: 'Invalid authorization' })
+    }
+    const token = authorization.split(' ')[1];
+    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+        if (err) {
+            return res.status(401).send({ err: true, message: 'unauthorized access' });
+        }
+        req.decoded = decoded;
+        next()
+    })
+}
+
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
@@ -31,6 +49,20 @@ async function run() {
 
         const servicesCollection = client.db('carServicing').collection('services');
         const bookingCollection = client.db('carServicing').collection('bookings');
+
+
+        // jwt api
+
+        app.post('/jwt', (req, res) => {
+            const user = req.body;
+            console.log(user);
+            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+                expiresIn: '1h'
+            });
+            res.send({ token })
+        })
+
+        // service api
 
         app.get('/services', async (req, res) => {
             const cursor = servicesCollection.find()
@@ -47,11 +79,15 @@ async function run() {
             const result = await servicesCollection.findOne(query, options);
             res.send(result);
         })
-        // bookings
+        // bookings api
 
-        app.get('/bookings', async (req, res) => {
-            console.log(req.query.email);
-            let query = {}
+        app.get('/bookings', verifyJWT, async (req, res) => {
+            console.log(req.headers.authorization);
+            const decoded = req.decoded;
+            if (decoded.email !== req.query.email) {
+                return res.status(403).send({error:true, message: 'forbidden access'})
+            }
+                let query = {}
 
             if (req.query?.email) {
                 query = { email: req.query.email }
@@ -79,7 +115,7 @@ async function run() {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) }
             const updatedBooking = req.body;
-            console.log(updatedBooking);
+            // console.log(updatedBooking);
             const updateDoc = {
                 $set: {
                     status: updatedBooking.status
